@@ -1,0 +1,59 @@
+[project]
+name = "job-search-agent"
+version = "0.1.0"
+description = "Personal Job Search Agent — an agentic AI system for finding, evaluating, and applying to jobs."
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    # LLM — primary provider is Google Gemini (see PLAN.md §4.3, §9)
+    "google-genai>=1.0.0",
+    # Vector store + local embeddings
+    "chromadb>=0.5.0",
+    "sentence-transformers>=3.0.0",
+    # Config + validation
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0",
+    "python-dotenv>=1.0.0",
+    # Structured logging
+    "structlog>=24.0.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "ruff>=0.6.0",
+]
+
+# ---------------------------------------------------------------------------
+# Package layout: source lives under src/ (imported as `src.*` for now).
+# ---------------------------------------------------------------------------
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
+
+# ---------------------------------------------------------------------------
+# Ruff — formatter + linter (see CLAUDE.md "Code Style and Structure")
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "scripts", "tests"]
+
+[tool.ruff.lint]
+# E/F = pyflakes+pycodestyle, I = isort (import order: stdlib, third-party, local),
+# UP = pyupgrade, B = bugbear, D = docstrings.
+select = ["E", "F", "I", "UP", "B", "D"]
+# D203/D213 conflict with the one-line-summary docstring style we use.
+ignore = ["D203", "D213"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.per-file-ignores]
+# Tests and scripts don't need full docstring coverage.
+"tests/*" = ["D"]
+"scripts/*" = ["D"]
+"**/__init__.py" = ["D104"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

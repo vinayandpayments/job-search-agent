@@ -53,23 +53,27 @@ This is the **Personal Job Search Agent** — an agentic AI system that ingests 
 - **Memory tiers are separate modules:** `src/memory/persistent.py`, `src/memory/working.py`, `src/memory/summarizer.py`. Do not merge them or add memory logic outside `src/memory/`.
 - **The agent loop is hand-written in `src/agent/loop.py`.** Do not replace it with a LangChain agent, LangGraph graph, or any other framework abstraction without explicit approval.
 - **MCP tools live in `src/mcp_server/tools/`, one file per tool.** Tool descriptions live inline with the tool definition and must be updated in tandem with any behavior change.
-- **All Anthropic API calls go through `src/llm/client.py`.** This is the only place where model names, caching config, and API keys are referenced. Do not scatter `anthropic.messages.create` calls across the codebase.
+- **All LLM (Gemini) API calls go through `src/llm/client.py`.** This is the only place where model names, caching config, and API keys are referenced. Do not scatter `genai` / `client.models.generate_content` calls across the codebase.
 - **All prompts live in `src/agent/prompts.py` or `src/llm/extraction.py`.** No inline prompt strings in business logic.
 
 ---
 
 ## LLM Usage Rules
 
+> **Provider:** Primary LLM is **Google Gemini** via the `google-genai` SDK (no Anthropic key available). A Grok/xAI key exists but is deferred as a fallback — do not wire it without asking. See PLAN.md §4.3 and §9.
+
 ### Model selection (see PLAN.md §4.3 for full table)
-- **Ingestion extraction:** Claude Haiku 4.5
-- **Agent loop, cover letters, fit analysis:** Claude Sonnet (latest)
-- **Session summarization:** Claude Haiku 4.5
+Concrete model IDs are defined **once** in `src/config.py` — refer to it, don't hard-code names elsewhere. Current mapping (Day 0, free-tier key):
+- **Ingestion extraction:** Gemini Flash-lite (`EXTRACTION_MODEL`)
+- **Agent loop, cover letters, fit analysis:** `AGENT_MODEL` (a Flash model) — the free-tier key has no Pro quota and billing is intentionally OFF; if Flash quality lags, the fallback is a free/open-source model (e.g. Ollama), not paid Pro. Do not add billing without asking.
+- **Session summarization:** Gemini Flash-lite (`SUMMARY_MODEL`)
 - **Embeddings:** local `sentence-transformers/all-MiniLM-L6-v2` — no API calls for embeddings
 
 If you propose a different model for a task, justify it in the same message.
 
 ### Prompt caching
-- System prompt + tool definitions + user profile summary form the stable prefix on every agent call. Configure caching on these.
+- System prompt + tool definitions + user profile summary form the stable prefix on every agent call. This should be cached.
+- **Gemini caching differs from Anthropic's.** Gemini uses explicit `CachedContent` (with a minimum-token threshold) plus implicit caching on some models — it is not automatic prefix caching. The concrete mechanism is **deferred to Phase 3**, when the stable prefix actually exists.
 - Tool results and conversation tail vary — do not cache these.
 - When adding a new field to the stable prefix, verify it does not vary per-call (or caching breaks).
 

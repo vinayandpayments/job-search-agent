@@ -145,18 +145,22 @@ Storage: Python dict/dataclass, keyed by session_id. Optionally backed by Redis 
 
 ### 4.3 Model Selection (Inference Engineering)
 
-| Task | Model | Reason |
+> **Provider note (Day 0):** The primary LLM is **Google Gemini**, not Anthropic Claude — the builder has a Gemini API key, not an Anthropic one. A "Flash" tier covers cheap high-volume tasks; a "Pro" tier covers reasoning-heavy, user-facing tasks. A Grok (xAI) key exists and is deferred as a future fallback. See §9 Decisions Log.
+>
+> **Concrete model IDs live in `src/config.py` (single source of truth), not here** — they churn fast. As of Day 0 the working key is **free-tier and billing is intentionally OFF**. Free tier (a) can no longer call `gemini-2.5-*` ("no longer available to new users") and (b) has **no usable Pro quota** (Pro models return 429 `free_tier_input_tokens` exhausted). Decision: run Flash across the board — `gemini-3.5-flash-lite` for cheap tasks, `gemini-3.6-flash` for the agent tier — and do **not** pay for Pro. If Flash quality proves insufficient for the agent tier, the fallback is a **free/open-source model** (e.g. a local model via Ollama), not billed Gemini Pro.
+
+| Task | Tier | Reason |
 |---|---|---|
-| Structured extraction during ingestion | Claude Haiku 4.5 | Schema-constrained JSON output, small model is enough, runs on every chunk |
+| Structured extraction during ingestion | Gemini Flash (lite) | Cheap, fast, schema-constrained JSON via `response_schema`; runs on every chunk |
 | Embedding generation | `sentence-transformers/all-MiniLM-L6-v2` (local) | Free, fast, good enough for job descriptions; no API cost per embedding |
-| Agent loop (tool calling + reasoning) | Claude Sonnet | Needs to reason about which tool to call, handle multi-step plans, refuse fabrication |
-| Cover letter drafting | Claude Sonnet | Quality of output matters, this is user-facing content |
-| Fit analysis (resume vs job) | Claude Sonnet | Nuanced comparison, worth the cost per call |
-| Session summarization (compressing old turns) | Claude Haiku | Simple task, runs frequently |
+| Agent loop (tool calling + reasoning) | Gemini Flash (`gemini-3.6-flash`) | Needs to reason about which tool to call, handle multi-step plans, refuse fabrication. Would prefer Pro, but free tier forbids it; open-source fallback if quality lags. |
+| Cover letter drafting | Gemini Flash (`gemini-3.6-flash`) | Quality of output matters, this is user-facing content |
+| Fit analysis (resume vs job) | Gemini Flash (`gemini-3.6-flash`) | Nuanced comparison |
+| Session summarization (compressing old turns) | Gemini Flash (lite) | Simple task, runs frequently |
 
 **Cost envelope target:** under $2/day of personal use assuming ~50 messages/day.
 
-**Caching strategy:** system prompt + tool definitions + user profile summary form a stable prefix on every agent call → these get prompt-cached. Only conversation tail + tool results vary. Expected cache hit rate on the stable portion: >90%.
+**Caching strategy:** system prompt + tool definitions + user profile summary form a stable prefix on every agent call → these should be cached. **Note:** Gemini's context caching differs from Anthropic's automatic prefix caching — it uses explicit `CachedContent` objects with a minimum-token threshold, plus implicit caching on some models. The stable prefix doesn't exist until the agent loop is built, so the concrete caching mechanism is **deferred to Phase 3** when the prefix is real. Goal remains: only conversation tail + tool results vary.
 
 ### 4.4 MCP Server Design
 
@@ -255,7 +259,7 @@ Built alongside the system, not after. Evaluation is a deliverable.
 
 **MCP SDK:** official Python `mcp` package. No alternatives worth considering.
 
-**Anthropic SDK:** official `anthropic` Python SDK. Direct API calls, no wrapper.
+**LLM SDK:** official `google-genai` Python SDK (the new unified Google GenAI SDK, `from google import genai`). Direct API calls, no wrapper. Grok (xAI) is deferred as a future fallback provider.
 
 **Vector store:** ChromaDB (already familiar to me, local, free).
 
@@ -467,3 +471,6 @@ Each phase ends with something demonstrable and evaluated.
 | Day 0 | Haiku for extraction, Sonnet for agent | Cost/capability match per task. |
 | Day 0 | Local embeddings (MiniLM), not API | Zero marginal cost, good enough for job descriptions. |
 | Day 0 | RemoteOK first, WWR + HN later | Cleanest API of the three; get pipeline working before adding parsing complexity. |
+| Day 0 | **Primary LLM = Gemini, not Anthropic Claude** | No Anthropic API key available; builder has Gemini + Grok keys. Gemini 2.5 Flash for cheap high-volume tasks (extraction, summarization), Gemini 2.5 Pro for reasoning/user-facing tasks (agent loop, cover letters, fit). Uses the `google-genai` SDK. Grok deferred as fallback. Supersedes the "Haiku/Sonnet" rows above and the "Anthropic SDK" note in §4.6. |
+| Day 0 | Gemini prompt caching deferred to Phase 3 | Gemini's caching model (explicit `CachedContent` + implicit) differs from Anthropic's automatic prefix caching; the stable prefix doesn't exist until the agent loop is built. |
+| Day 0 | **Flash-only, no billing; open-source fallback if needed** | The free-tier key can't call `gemini-2.5-*` and has no Pro quota (429). Verified working: `gemini-3.5-flash-lite`, `gemini-3.6-flash`. Billing is intentionally OFF — agent-tier tasks run on Flash; if quality lags, fall back to a free/open-source model (e.g. Ollama-hosted), not paid Pro. Concrete IDs pinned in `src/config.py`. |
