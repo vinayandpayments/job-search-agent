@@ -108,7 +108,7 @@ When given a task, this is the expected flow:
 
 1. **Restate the task** in your own words before starting, especially if it's non-trivial.
 2. **Identify affected files** and any principles or architectural rules that apply.
-3. **Propose the approach** in prose before writing code, if the task is non-obvious.
+3. **Discuss before code — with the user, not just in prose.** For module work (PLAN.md §6) this is mandatory: open with a concept walkthrough of the internals, present the decision menu with tradeoffs, and wait for Vinay's call on non-trivial forks. See PLAN.md "Working Agreement". Code lands only in small, explainable increments after decisions.
 4. **Write the code** with clear commit-sized boundaries.
 5. **Update `PLAN.md`'s Decisions Log** if a non-obvious choice was made.
 6. **Update or add evals** if agent behavior, tools, or prompts changed.

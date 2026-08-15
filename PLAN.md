@@ -16,6 +16,18 @@
 
 **Primary user:** Me, actively job-hunting. This is critical: every day I use it, I generate real evaluation signal. The daily-use feedback loop is a design pillar, not an afterthought.
 
+**Primary success criterion (v2):** the learning. This project is the vehicle for understanding production agentic AI at the deepest level — RAG internals, tool calling, memory, context/harness engineering, multi-agent orchestration, and predictive evaluation. A shipped feature whose design I can't defend from first principles is a failure even if it works. Interface is **CLI only** — the React frontend is out of scope (dropped from the roadmap).
+
+### Working Agreement (how this gets built)
+
+Discussion is the primary mode; implementation is the residue of decisions.
+
+1. Every module opens with a **concept walkthrough** — internals, not summaries — then a **decision menu**: each real option with honest tradeoffs and a recommendation.
+2. **Vinay makes the call.** Non-trivial forks are not implemented undecided; silence means ask, not default.
+3. **Cross-examination runs both ways.** Vinay challenges claims; Claude asks check-questions back. Being corrected is the process working.
+4. Code lands in **small, explainable increments** — nothing ships that Vinay couldn't re-derive.
+5. Every decided fork gets a Decisions Log row (§9) including the **rejected alternatives and why** — interview-ready reasoning is a deliverable.
+
 ---
 
 ## 2. Why This Project (Skill Coverage Map)
@@ -29,6 +41,7 @@ Every JD skill area must be exercised deeply. This is the mapping:
 | **Tool Design & MCP** | Custom MCP server exposing tools with real design tension (`search_jobs` vs `semantic_job_search` — the classic list-vs-search failure mode the JD tests on). Tool descriptions matter. Debugging tool selection is a real problem here, not a synthetic one. |
 | **Inference Engineering** | Tiered model use: cheap model (Haiku) for extraction during ingestion, capable model (Sonnet) for the agent loop. Cost envelope managed and measured. Prompt caching on the tool definitions + system prompt saves real money over hundreds of daily queries. |
 | **Evaluation Harness** | Test set of ~50 queries with known-correct behavior. Metrics: retrieval accuracy (are the right jobs returned?), citation accuracy (does every recommendation link to source?), fabrication refusal (does it say "I don't know" when it should?), preference-learning behavior (does it adapt after N feedback signals?). |
+| **Harness Engineering** | Everything around the model that makes it reliable, built by hand: the agent loop itself, context assembly + token budgeting, tool-result truncation, retry/failure policy, per-turn tracing/observability. M5 is dedicated to this; M8 extends it to multi-agent orchestration. |
 
 ---
 
@@ -265,9 +278,9 @@ Built alongside the system, not after. Evaluation is a deliverable.
 
 **Embeddings:** `sentence-transformers/all-MiniLM-L6-v2` locally (no API cost).
 
-**Backend framework:** FastAPI (async, clean, good for streaming responses to the frontend).
+**Backend framework:** FastAPI (async, clean) — only if an HTTP API is ever needed; the primary interface is the CLI.
 
-**Frontend:** React + TypeScript + Vite. Chat UI + application tracker + profile editor. Deferred to Phase 4 — not needed to demonstrate agent quality.
+**Frontend:** none — dropped from scope (see §9 Day 1). The CLI is the interface; agent quality is the demo.
 
 ---
 
@@ -333,8 +346,6 @@ job-search-agent/
 │   ├── jobs.db              ← SQLite
 │   └── user/                ← resume, profile, preferences (gitignored)
 │
-├── frontend/                ← React + TypeScript + Vite (Phase 4)
-│
 └── scripts/
     ├── run_ingestion.py
     ├── run_agent_cli.py     ← chat with the agent from the terminal
@@ -343,88 +354,77 @@ job-search-agent/
 
 ---
 
-## 6. Phased Implementation Plan
+## 6. Learning-Module Roadmap (v2)
 
-Each phase ends with something demonstrable and evaluated.
+> **Restructured (Day 1 of module work):** the original phase plan (Phases 0–9) is replaced by learning modules. Mapping: Phase 0 → done; Phase 1 → done (M1 retro-opens its quality decisions); Phase 2 → M4; Phase 3 → M5+M6; Phase 4 → folded into M5/M7; Phase 5 → M7 (but evals now start in M1); Phase 6 → deferred, slot after M7; Phase 7 (frontend) → **dropped, CLI only**; Phase 8 (LangGraph) → replaced by M8 (hand-built multi-agent); Phase 9 → M10.
 
-### Phase 0 — Foundations (Day 1)
-- Repo setup, pyproject.toml, .env, config
-- SQLite schema for jobs, applications, preferences
-- ChromaDB initialization
-- Basic Anthropic + sentence-transformers wiring, verified with a hello-world call
+Each module carries: **Learning goals · Discussion questions (answered with Vinay BEFORE code) · Build · Eval artifact · Definition of done.** Modules end with something demonstrable *and* a metric.
 
-**Definition of done:** can insert a fake job into SQLite, embed a string into ChromaDB, and call Sonnet with a test prompt. All from CLI.
+### M1 — Grounding Starts at Ingestion *(retro; in progress)*
+- **Learning goals:** data quality as the root of no-hallucination; designing validity predicates; when an extractor must say null.
+- **Discussion:** what predicate makes a record "a job"? Where does the quality filter live (normalizer vs separate stage)? Should extraction require a quoted evidence span? What are the first eval assertions?
+- **Build:** junk filter, full HTML unescaping, grounded extraction prompt; `evals/` gets its first data-quality assertions (not waiting for M7).
+- **Eval artifact:** % non-jobs in store (target ~0); % extracted fields traceable to source text.
+- **DoD:** re-ingestion produces a store where every row passes the validity assertions; known junk examples are rejected with logged reasons.
 
-### Phase 1 — Ingestion Pipeline (Days 2–4)
-- One fetcher (RemoteOK — has clean JSON API, best to start)
-- Normalizer + deduper
-- Chunker
-- Extractor (Haiku-powered, with pydantic schema)
-- Pipeline orchestrator
-- Persist to both stores
-- Ingest ~500 real jobs
+### M2 — Storage Internals *(retro discussion)*
+- **Learning goals:** vector DB landscape (Chroma vs pgvector/Qdrant/FAISS); how HNSW search actually works; embedding anatomy (MiniLM pooling, 384 dims, cosine vs L2); where metadata filtering breaks down.
+- **Discussion:** would we still choose SQLite+Chroma knowing the internals? What would force a migration?
+- **Build:** small experiments (recall vs ef_search, distance-metric comparison); code changes only if we decide differently.
+- **Eval artifact:** measured recall/latency table from our own data.
+- **DoD:** decision log row: storage choice re-affirmed or changed, with evidence.
 
-**Definition of done:** `python scripts/run_ingestion.py` populates both stores with real job data. Inspect via `scripts/inspect_db.py`.
+### M3 — Chunking Lab *(deep dive)*
+- **Learning goals:** chunking strategies (fixed / recursive / semantic / section-aware) and how chunk geometry drives retrieval quality.
+- **Discussion:** what does a "good chunk" mean for job postings? What golden queries define success?
+- **Build:** golden retrieval set (~20 query→expected-job pairs from ingested data); harness comparing strategies on precision@k / MRR.
+- **Eval artifact:** per-strategy scoreboard; chosen strategy justified by numbers.
+- **DoD:** chunker configured by evidence, not defaults; scoreboard committed under `evals/reports/`.
 
-### Phase 2 — MCP Server + First Two Tools (Days 5–6)
-- MCP server skeleton
-- `search_jobs` and `semantic_job_search` tools implemented
-- Verify from Claude Desktop (manual sanity check)
+### M4 — Tool Calling & MCP
+- **Learning goals:** tool-description engineering; the `search_jobs` vs `semantic_job_search` selection tension; debugging wrong-tool calls.
+- **Discussion:** tool schema design; how descriptions steer selection; what a tool-selection eval looks like.
+- **Build:** MCP server + first two tools; tool-selection eval queries.
+- **Eval artifact:** tool-selection accuracy on ~15 annotated queries.
+- **DoD:** from an MCP client, filter-y queries hit `search_jobs`, fuzzy ones hit `semantic_job_search`, measured.
 
-**Definition of done:** in Claude Desktop, can ask "find Python backend roles" and see the tool called with correct filters, results returned.
+### M5 — The Agent Loop = Harness Engineering
+- **Learning goals:** what a harness is: the loop, context assembly, token budgeting, tool-result truncation, retries, tracing; context engineering per turn; citations + refusal ("not found in source") wired into the loop, not hoped for.
+- **Discussion:** context budget layout; truncation policy; failure/retry policy; trace format.
+- **Build:** hand-written loop (`src/agent/loop.py`), CLI chat, per-turn trace log.
+- **Eval artifact:** citation completeness; fabrication-refusal rate on synthetic no-answer queries.
+- **DoD:** multi-turn CLI conversation with visible traces; refusal cases pass.
 
-### Phase 3 — Agent Loop + Memory (Days 7–10)
-- Hand-written agent loop that connects to MCP server
-- Persistent memory: profile ingestion (parse a PDF resume), preferences CRUD
-- Working memory: session state
-- Persistent memory summarization for prompt inclusion
-- CLI chat interface
+### M6 — Memory Engineering
+- **Learning goals:** persistent / working / summarized tiers; summarize-before-inject discipline; how Claude-Code-style memory works (files + index as live example).
+- **Discussion:** what belongs in each tier; when summaries regenerate; memory poisoning risks.
+- **Build:** `src/memory/*` (profile ingestion, preferences CRUD, session state, summarizer).
+- **Eval artifact:** memory evals — recall across sessions, adaptation after feedback signals.
+- **DoD:** agent demonstrably uses profile + past signals; summaries stay under a token budget.
 
-**Definition of done:** `python scripts/run_agent_cli.py` lets me have a multi-turn conversation. Agent uses tools correctly, remembers within a session, has my profile in context.
+### M7 — Evaluation Harness (consolidated)
+- **Learning goals:** metrics that *predict* performance vs vanity metrics; regression discipline.
+- **Discussion:** which of the 7 metrics (tool accuracy, precision@k, citations, refusal, preference-learning, cost, latency) predict real-use success, and how we'd know.
+- **Build:** ~50-query test set + `evals/run_evals.py` + report with regressions (absorbs M1–M6 artifacts).
+- **DoD:** one command produces a scored report; a deliberate regression is caught.
 
-### Phase 4 — Remaining Tools + Feedback Signals (Days 11–13)
-- `analyze_fit`, `draft_cover_letter`, `find_skill_gaps`, `track_application`, `update_preferences`, `get_application_status`
-- Feedback signal capture (viewed/saved/rejected)
-- Learned_facts extraction (agent updates durable inferences after N signals)
+### M8 — Multi-Agent Orchestration *(from scratch; replaces LangGraph phase)*
+- **Learning goals:** orchestrator/worker patterns; parallel sub-agents with different missions; central synthesis; per-agent observability.
+- **Discussion:** when multi-agent beats single-agent (and when it's just overhead); shared-state vs message-passing; failure isolation.
+- **Build:** orchestrator spawning parallel sub-agents (e.g. fit-analysis fan-out across job clusters), synthesis step, CLI trace viewer.
+- **Eval artifact:** quality + latency vs single-agent baseline on the same tasks.
+- **DoD:** one query fans out to N agents and returns a synthesized, traceable answer.
 
-**Definition of done:** can complete a full workflow: search → analyze fit on a specific job → draft cover letter → track application. All from CLI.
+### M9 — Caching & Inference Economics
+- **Learning goals:** Gemini CachedContent vs implicit caching vs Anthropic-style prefix caching; embedding caches; measuring $/query.
+- **Build:** cache the stable prefix (deferred from Phase 0); embedding cache; cost table.
+- **DoD:** measured cost/latency before vs after caching.
 
-### Phase 5 — Evaluation Harness (Days 14–15)
-- Test set of ~50 queries
-- Eval runner
-- All metrics implemented
-- First eval report generated
+### M10 — Write-up & Polish
+- README, architecture doc, demo (CLI recording), blog post. No frontend.
 
-**Definition of done:** `python evals/run_evals.py` produces a scored report. Regressions caught automatically.
-
-### Phase 6 — Second and Third Ingestion Sources (Day 16)
-- WeWorkRemotely (RSS parser)
-- HN "Who's Hiring" (monthly thread parser)
-- Deduper handles cross-source dupes
-
-**Definition of done:** ingestion runs against all three sources, dedupes correctly.
-
-### Phase 7 — FastAPI + React Frontend (Days 17–22)
-- FastAPI routes wrapping the agent
-- Chat UI with streaming
-- Application tracker (kanban)
-- Profile editor
-- Job feed with filter sidebar (traditional UI as fallback)
-
-**Definition of done:** everything works from browser, not just CLI.
-
-### Phase 8 — LangGraph Migration Evaluation (Day 23)
-- Prototype the agent loop in LangGraph
-- Compare: code complexity, debuggability, feature velocity
-- Decide: migrate or stay hand-written. Document reasoning in decisions log.
-
-### Phase 9 — Polish, Docs, Public Write-up (Days 24–25)
-- README with setup + demo GIFs
-- Architecture doc for public consumption
-- Blog post: "Building a Personal Job Search Agent — Lessons in Agentic AI"
-- Deploy an anonymized demo if possible
-
-**Total: ~4 weeks of focused work.**
+### Later / optional
+- Additional sources (WWR RSS, HN Who's Hiring) — slot after M7, exercises the messy-text extraction path.
 
 ---
 
@@ -434,7 +434,7 @@ Each phase ends with something demonstrable and evaluated.
 - RemoteOK / WWR / HN data volume may be lower than expected — mitigate by adding more sources
 - Structured extraction quality on messy postings — mitigate with schema iteration + eval-driven tuning
 - MCP + Claude Sonnet cost may exceed $2/day target — mitigate with caching and Haiku-first routing where possible
-- Frontend phase may slip — acceptable; CLI is a valid demo
+- Discussion-first pace is slower than build-first — accepted deliberately; understanding is the deliverable
 
 **Open questions to resolve during build:**
 - Exact chunking strategy for job postings — test 200/500/1000 token chunks in Phase 1
@@ -474,3 +474,8 @@ Each phase ends with something demonstrable and evaluated.
 | Day 0 | **Primary LLM = Gemini, not Anthropic Claude** | No Anthropic API key available; builder has Gemini + Grok keys. Gemini 2.5 Flash for cheap high-volume tasks (extraction, summarization), Gemini 2.5 Pro for reasoning/user-facing tasks (agent loop, cover letters, fit). Uses the `google-genai` SDK. Grok deferred as fallback. Supersedes the "Haiku/Sonnet" rows above and the "Anthropic SDK" note in §4.6. |
 | Day 0 | Gemini prompt caching deferred to Phase 3 | Gemini's caching model (explicit `CachedContent` + implicit) differs from Anthropic's automatic prefix caching; the stable prefix doesn't exist until the agent loop is built. |
 | Day 0 | **Flash-only, no billing; open-source fallback if needed** | The free-tier key can't call `gemini-2.5-*` and has no Pro quota (429). Verified working: `gemini-3.5-flash-lite`, `gemini-3.6-flash`. Billing is intentionally OFF — agent-tier tasks run on Flash; if quality lags, fall back to a free/open-source model (e.g. Ollama-hosted), not paid Pro. Concrete IDs pinned in `src/config.py`. |
+| Day 1 | **Roadmap restructured into learning modules (§6 v2)** | Primary aim clarified: deep learning of agentic AI, not shipping speed. Phases → modules M1–M10, each opening with discussion before code. Rejected: keeping the phase plan as-is (it front-loaded building over understanding). |
+| Day 1 | Keep Phase 0/1 code; retro-open its decisions | Rebuilding scaffolding teaches little; the decisions are where learning lives. Storage choice, chunking, and extraction quality get re-examined as modules (M1–M3) and changed if discussion concludes differently. Rejected: full restart (2 sessions of re-plumbing for no new insight). |
+| Day 1 | RAG stays job-specific for now | Depth over abstraction: learn internals in context first; genericizing into a reusable engine is mechanical later. Rejected (for now): a generic `src/rag/` package or standalone pip package. |
+| Day 1 | Multi-agent after single-agent loop works (M8) | Must deeply understand one hand-written loop before orchestrating several; M8 replaces the LangGraph-migration phase — orchestration will also be hand-built. Rejected: designing multi-agent-first (carries complexity before understanding). |
+| Day 1 | **Frontend dropped — CLI only** | Learning goals live in the agent/RAG/eval layers; a React UI adds surface area with no agentic learning. `frontend/` removed from repo tree. |
