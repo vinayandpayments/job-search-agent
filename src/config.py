@@ -16,6 +16,7 @@ PROJECT_ROOT: Path = Path(__file__).resolve().parent.parent
 DATA_DIR: Path = PROJECT_ROOT / "data"
 SQLITE_PATH: Path = DATA_DIR / "jobs.db"
 CHROMA_DIR: Path = DATA_DIR / "chroma"
+RAW_DIR: Path = DATA_DIR / "raw"  # bronze layer: unmodified fetched payloads (JSONL)
 
 # --- Model choices (see PLAN.md §4.3) ----------------------------------------
 # Primary provider is Google Gemini. Flash = cheap high-volume tasks,
@@ -33,6 +34,22 @@ SUMMARY_MODEL: str = "gemini-3.5-flash-lite"
 
 # Local embedding model — no API calls, zero marginal cost.
 EMBEDDING_MODEL: str = "sentence-transformers/all-MiniLM-L6-v2"
+
+# --- Rate limiting -----------------------------------------------------------
+# Free-tier Gemini has tight per-minute limits. Every LLM call routes through
+# src/llm/client.py, which enforces this ceiling with backoff. Conservative by
+# default; raise if the key's tier allows more.
+GEMINI_RPM: int = 8  # max Gemini requests per minute
+
+# --- Ingestion ---------------------------------------------------------------
+REMOTEOK_API_URL: str = "https://remoteok.com/api"
+DEFAULT_INGEST_LIMIT: int = 50  # jobs per run by default (scale up once stable)
+
+# Chunking for the embedding path (character-based; ~4 chars ≈ 1 token).
+# Job descriptions are short, so these are generous starting values — tune in
+# Phase 1 per PLAN.md §7 (test 200/500/1000 tokens).
+CHUNK_SIZE: int = 1000
+CHUNK_OVERLAP: int = 100
 
 
 class Settings(BaseSettings):

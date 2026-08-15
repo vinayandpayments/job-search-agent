@@ -61,3 +61,34 @@ def get_jobs_collection(persist_dir: Path = CHROMA_DIR) -> Collection:
         embedding_function=get_embedding_function(),
         metadata={"hnsw:space": "cosine"},
     )
+
+
+def upsert_job_chunks(
+    collection: Collection,
+    job_id: str,
+    chunks: list[str],
+    base_metadata: dict[str, object] | None = None,
+) -> int:
+    """Embed and upsert a job's text chunks into the collection.
+
+    Chunk ids are ``"{job_id}::chunk{i}"`` so re-ingesting a job overwrites its
+    prior chunks rather than duplicating them. Each chunk carries ``job_id`` and
+    ``chunk_index`` metadata (plus any ``base_metadata``) so semantic hits can be
+    joined back to the SQLite row.
+
+    Args:
+        collection: The target collection (embeds locally on upsert).
+        job_id: The owning job's id.
+        chunks: The text chunks to store.
+        base_metadata: Extra metadata to attach to every chunk (e.g. source).
+
+    Returns:
+        The number of chunks upserted.
+    """
+    if not chunks:
+        return 0
+    base = base_metadata or {}
+    ids = [f"{job_id}::chunk{i}" for i in range(len(chunks))]
+    metadatas = [{**base, "job_id": job_id, "chunk_index": i} for i in range(len(chunks))]
+    collection.upsert(ids=ids, documents=chunks, metadatas=metadatas)
+    return len(chunks)

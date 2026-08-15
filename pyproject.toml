@@ -10,6 +10,8 @@ dependencies = [
     # Vector store + local embeddings
     "chromadb>=0.5.0",
     "sentence-transformers>=3.0.0",
+    # Chunking (pre-approved in PLAN.md §4.6 — RecursiveCharacterTextSplitter)
+    "langchain-text-splitters>=0.3.0",
     # Config + validation
     "pydantic>=2.0.0",
     "pydantic-settings>=2.0.0",

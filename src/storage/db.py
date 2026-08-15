@@ -12,8 +12,10 @@ script under ``src/storage/migrations/``.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from pathlib import Path
+from typing import Any
 
 from src.config import SQLITE_PATH
 
@@ -109,3 +111,65 @@ def init_db(db_path: Path = SQLITE_PATH) -> None:
         conn.commit()
     finally:
         conn.close()
+
+
+# Columns written by insert_job, in order. `stack` is JSON-serialized here so
+# callers can pass a plain Python list (see NormalizedJob.to_row).
+_JOB_COLUMNS = (
+    "id",
+    "company",
+    "role",
+    "location",
+    "remote_type",
+    "stack",
+    "experience_years",
+    "salary_min",
+    "salary_max",
+    "posted_date",
+    "description",
+    "source",
+    "source_url",
+)
+
+
+def insert_job(conn: sqlite3.Connection, job: dict[str, Any]) -> bool:
+    """Insert one job, ignoring duplicates by ``source_url``.
+
+    Uses ``INSERT OR IGNORE`` so re-ingesting the same posting is a no-op rather
+    than an error (the UNIQUE(source_url) constraint dedupes across runs).
+    Does not commit — the caller controls the transaction boundary.
+
+    Args:
+        conn: An open connection.
+        job: A dict with keys matching ``_JOB_COLUMNS``; ``stack`` may be a list.
+
+    Returns:
+        True if a new row was inserted, False if it already existed.
+    """
+    values = []
+    for col in _JOB_COLUMNS:
+        val = job.get(col)
+        if col == "stack":
+            val = json.dumps(val or [])
+        values.append(val)
+    placeholders = ", ".join("?" for _ in _JOB_COLUMNS)
+    cursor = conn.execute(
+        f"INSERT OR IGNORE INTO jobs ({', '.join(_JOB_COLUMNS)}) VALUES ({placeholders});",
+        values,
+    )
+    return cursor.rowcount > 0
+
+
+def job_exists(conn: sqlite3.Connection, source_url: str) -> bool:
+    """Return True if a job with this ``source_url`` is already stored.
+
+    Lets the pipeline skip existing jobs *before* spending an LLM enrichment
+    call on them (source_url is the cross-run dedup key).
+    """
+    row = conn.execute("SELECT 1 FROM jobs WHERE source_url = ? LIMIT 1;", (source_url,)).fetchone()
+    return row is not None
+
+
+def count_jobs(conn: sqlite3.Connection) -> int:
+    """Return the total number of jobs in the store."""
+    return conn.execute("SELECT COUNT(*) FROM jobs;").fetchone()[0]
